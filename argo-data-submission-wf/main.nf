@@ -41,6 +41,8 @@ params.cleanup = true
 // ArgoDataSubmissionWf
 params.study_id=""
 params.download_mode="local"
+// Opt in only when the execution service already uses the Kubernetes executor.
+params.k8s_submission = false
 params.song_container = "ghcr.io/overture-stack/song-client"
 params.song_container_version = "5.0.2"
 params.score_container = "ghcr.io/overture-stack/score"
@@ -238,11 +240,30 @@ workflow ArgoDataSubmissionWf {
     clinical_url
   main:
 
-    if (!"${workflow.profile}".contains('docker') && !"${workflow.profile}".contains('singularity')){
-        exit 1, "Error Missing profile. `-profile` must be specified with the engines :`docker` or `singularity`."
-    }
-    if (!"${workflow.profile}".contains('rdpc_qa') && !"${workflow.profile}".contains('rdpc_dev') && !"${workflow.profile}".contains('rdpc')){
-        exit 1, "Error Missing profile. `-profile` must be specified with the rdpc environments : `rdpc_qa`,`rdpc_dev`, or `rdpc`."
+    if (params.k8s_submission) {
+        // K8s executes each process in its declared container; no local Docker
+        // or Singularity profile is needed. Require explicit site endpoints
+        // instead of relying on the rdpc profile defaults.
+        def requiredEndpoints = [
+            song_url: song_url,
+            score_url: params.score_url,
+            clinical_url: clinical_url,
+            schema_url: params.schema_url
+        ]
+        def missingEndpoints = requiredEndpoints.findAll { key, value ->
+            !value || !value.toString().trim()
+        }.keySet()
+        if (missingEndpoints) {
+            exit 1, "Kubernetes submission requires explicit endpoints: ${missingEndpoints.join(", ")}"
+        }
+        log.info "Kubernetes submission mode: using declared process containers and explicit service endpoints"
+    } else {
+        if (!"${workflow.profile}".contains('docker') && !"${workflow.profile}".contains('singularity')){
+            exit 1, "Error Missing profile. `-profile` must be specified with the engines :`docker` or `singularity`."
+        }
+        if (!"${workflow.profile}".contains('rdpc_qa') && !"${workflow.profile}".contains('rdpc_dev') && !"${workflow.profile}".contains('rdpc')){
+            exit 1, "Error Missing profile. `-profile` must be specified with the rdpc environments : `rdpc_qa`,`rdpc_dev`, or `rdpc`."
+        }
     }
 
     if (!params.api_token){
